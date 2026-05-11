@@ -1,5 +1,6 @@
 package com.example.examplemod;
 
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.PathfinderMob;
@@ -47,6 +48,14 @@ public class TestMonsterEntity extends PathfinderMob implements GeoEntity {
         }
 
         return animationState.setAndContinue(STAND_ANIM);
+    }
+
+    @Override
+    public boolean hurt(DamageSource source, float amount) {
+        if (source.getEntity() instanceof Player) {
+            return false;
+        }
+        return super.hurt(source, amount);
     }
 
     @Override
