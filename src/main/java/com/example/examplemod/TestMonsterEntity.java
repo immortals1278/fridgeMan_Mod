@@ -1,6 +1,7 @@
 package com.example.examplemod;
 
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.entity.player.Player;
@@ -53,7 +54,7 @@ public class TestMonsterEntity extends PathfinderMob implements GeoEntity {
         super.registerGoals();
 
         this.goalSelector.addGoal(0, new FloatGoal(this));
-        this.goalSelector.addGoal(2, new MeleeAttackGoal(this, 1.0D, false));
+        this.goalSelector.addGoal(2, new TestMonsterMeleeAttackGoal(this, 1.0D, true));
         this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 0.9D));
         this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
 
@@ -67,6 +68,18 @@ public class TestMonsterEntity extends PathfinderMob implements GeoEntity {
             .add(Attributes.ATTACK_DAMAGE, 8.0D)
             .add(Attributes.FOLLOW_RANGE, 32.0D)
             .add(Attributes.MOVEMENT_SPEED, 0.25D);
+    }
+
+    private static class TestMonsterMeleeAttackGoal extends MeleeAttackGoal {
+        public TestMonsterMeleeAttackGoal(PathfinderMob mob, double speedModifier, boolean followingTargetEvenIfNotSeen) {
+            super(mob, speedModifier, followingTargetEvenIfNotSeen);
+        }
+
+        @Override
+        protected double getAttackReachSqr(LivingEntity target) {
+            // Large model needs a longer melee reach to avoid orbiting around the target.
+            return Math.pow(this.mob.getBbWidth() * 2.2F, 2) + target.getBbWidth();
+        }
     }
 }
 
