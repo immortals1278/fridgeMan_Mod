@@ -1,11 +1,13 @@
 package com.example.examplemod;
 
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
@@ -26,7 +28,11 @@ import software.bernie.geckolib.util.GeckoLibUtil;
 public class TestMonsterEntity extends PathfinderMob implements GeoEntity {
     private static final RawAnimation WALK_ANIM = RawAnimation.begin().thenLoop("walk");
     private static final RawAnimation STAND_ANIM = RawAnimation.begin().thenLoop("stand");
+    private static final int GRAB_DURATION = 25;
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
+
+    private Player grabbedPlayer;
+    private int grabTimer;
 
     protected TestMonsterEntity(EntityType<? extends PathfinderMob> pEntityType, Level pLevel) {
         super(pEntityType, pLevel);
@@ -56,6 +62,47 @@ public class TestMonsterEntity extends PathfinderMob implements GeoEntity {
             return false;
         }
         return super.hurt(source, amount);
+    }
+
+    @Override
+    public boolean doHurtTarget(Entity target) {
+        if (target instanceof Player player && this.grabbedPlayer == null) {
+            this.grabbedPlayer = player;
+            this.grabTimer = GRAB_DURATION;
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public void aiStep() {
+        super.aiStep();
+
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        if (this.grabbedPlayer == null) {
+            return;
+        }
+
+        if (!this.grabbedPlayer.isAlive() || this.isDeadOrDying()) {
+            this.grabbedPlayer = null;
+            return;
+        }
+
+        if (this.grabTimer > 0) {
+            this.grabbedPlayer.setDeltaMovement(Vec3.ZERO);
+            this.grabbedPlayer.xxa = 0;
+            this.grabbedPlayer.zza = 0;
+            this.grabbedPlayer.teleportTo(this.getX(), this.getY(), this.getZ());
+            this.getNavigation().stop();
+            this.setDeltaMovement(Vec3.ZERO);
+            this.grabTimer--;
+        } else {
+            this.grabbedPlayer.kill();
+            this.grabbedPlayer = null;
+        }
     }
 
     @Override
