@@ -2,7 +2,9 @@ package com.example.examplemod;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTab;
@@ -20,6 +22,7 @@ import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.client.event.ViewportEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -29,6 +32,8 @@ import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
 import org.slf4j.Logger;
 import software.bernie.geckolib.GeckoLib;
+
+import java.util.Comparator;
 
 // The value here should match an entry in the META-INF/mods.toml file
 @Mod(ExampleMod.MODID)
@@ -136,6 +141,41 @@ public class ExampleMod
         @SubscribeEvent
         public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
             event.registerEntityRenderer(ModEntities.TEST_MONSTER.get(), TestMonsterRenderer::new);
+        }
+    }
+
+    @Mod.EventBusSubscriber(modid = MODID, value = Dist.CLIENT)
+    public static class ClientForgeEvents
+    {
+        @SubscribeEvent
+        public static void onComputeCameraAngles(ViewportEvent.ComputeCameraAngles event) {
+            if (!(event.getCamera().getEntity() instanceof LocalPlayer player)) {
+                return;
+            }
+
+            TestMonsterEntity monster = player.level().getEntitiesOfClass(
+                    TestMonsterEntity.class,
+                    player.getBoundingBox().inflate(64.0D),
+                    candidate -> candidate.isGrabbing(player)
+            ).stream().min(Comparator.comparingDouble(candidate -> candidate.distanceToSqr(player))).orElse(null);
+
+            if (monster == null) {
+                return;
+            }
+
+            Vec3 eyePos = player.getEyePosition((float) event.getPartialTick());
+            Vec3 lookTarget = monster.position().add(0.0D, monster.getBbHeight() * 0.65D, 0.0D);
+            Vec3 toMonster = lookTarget.subtract(eyePos);
+            double horizontalDistance = Math.sqrt(toMonster.x * toMonster.x + toMonster.z * toMonster.z);
+            float yaw = (float)(Math.toDegrees(Math.atan2(toMonster.z, toMonster.x)) - 90.0D);
+            float pitch = (float)(-Math.toDegrees(Math.atan2(toMonster.y, horizontalDistance)));
+
+            event.setYaw(yaw);
+            event.setPitch(pitch);
+            player.setYRot(yaw);
+            player.setYHeadRot(yaw);
+            player.setYBodyRot(yaw);
+            player.setXRot(pitch);
         }
     }
 }

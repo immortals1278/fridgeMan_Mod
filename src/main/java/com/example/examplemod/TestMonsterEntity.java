@@ -1,10 +1,16 @@
 package com.example.examplemod;
 
+import net.minecraft.server.level.ServerPlayer;
+import java.util.Optional;
+import java.util.UUID;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.PathfinderMob;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
@@ -28,11 +34,17 @@ import software.bernie.geckolib.util.GeckoLibUtil;
 public class TestMonsterEntity extends PathfinderMob implements GeoEntity {
     private static final RawAnimation WALK_ANIM = RawAnimation.begin().thenLoop("walk");
     private static final RawAnimation STAND_ANIM = RawAnimation.begin().thenLoop("stand");
-    private static final int GRAB_DURATION = 25;
+    private static final RawAnimation EXECUTE_ANIM = RawAnimation.begin().thenLoop("execute");
+    private static final int GRAB_DURATION = 40;
+    private static final EntityDataAccessor<Boolean> EXECUTING =
+        SynchedEntityData.defineId(TestMonsterEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Optional<UUID>> GRABBED_PLAYER_UUID =
+        SynchedEntityData.defineId(TestMonsterEntity.class, EntityDataSerializers.OPTIONAL_UUID);
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 
     private Player grabbedPlayer;
     private int grabTimer;
+    private Vec3 grabFacing = new Vec3(0.0D, 0.0D, 1.0D);
 
     protected TestMonsterEntity(EntityType<? extends PathfinderMob> pEntityType, Level pLevel) {
         super(pEntityType, pLevel);
@@ -48,12 +60,97 @@ public class TestMonsterEntity extends PathfinderMob implements GeoEntity {
         return this.cache;
     }
 
+    @Override
+    protected void defineSynchedData() {
+        super.defineSynchedData();
+        this.entityData.define(EXECUTING, false);
+        this.entityData.define(GRABBED_PLAYER_UUID, Optional.empty());
+    }
+
     private PlayState movementPredicate(AnimationState<TestMonsterEntity> animationState) {
+        if (this.isExecuting()) {
+            return animationState.setAndContinue(EXECUTE_ANIM);
+        }
+        
         if (animationState.isMoving()) {
             return animationState.setAndContinue(WALK_ANIM);
         }
 
         return animationState.setAndContinue(STAND_ANIM);
+    }
+
+    private boolean isExecuting() {
+        return this.entityData.get(EXECUTING);
+    }
+
+    public boolean isGrabbing(Player player) {
+        return this.isExecuting() && this.entityData.get(GRABBED_PLAYER_UUID)
+            .map(player.getUUID()::equals)
+            .orElse(false);
+    }
+
+    private void setExecuting(boolean executing) {
+        this.entityData.set(EXECUTING, executing);
+        this.setNoAi(executing);
+    }
+
+    private Vec3 captureGrabFacing(Player player) {
+        Vec3 towardGhost = new Vec3(this.getX() - player.getX(), 0.0D, this.getZ() - player.getZ());
+
+        if (towardGhost.lengthSqr() < 1.0E-6D) {
+            towardGhost = Vec3.directionFromRotation(0.0F, this.getYRot()).scale(-1.0D);
+            towardGhost = new Vec3(towardGhost.x, 0.0D, towardGhost.z);
+        }
+
+        return towardGhost.normalize();
+    }
+
+    private Vec3 getGrabbedPlayerPosition() {
+        Vec3 right = new Vec3(-this.grabFacing.z, 0.0D, this.grabFacing.x);
+        return new Vec3(this.getX(), this.getY(), this.getZ())
+            .subtract(this.grabFacing.scale(3.0D))
+            .add(right.scale(1.5D))
+            .add(0.0D, -1.0D, 0.0D);
+    }
+
+    private static float getYawFromDirection(Vec3 direction) {
+        return (float)(Math.toDegrees(Math.atan2(direction.z, direction.x)) - 90.0D);
+    }
+
+    private void faceGrabbedPlayer() {
+        Vec3 toPlayer = this.getGrabbedPlayerPosition().subtract(this.position());
+        float yaw = getYawFromDirection(toPlayer);
+
+        this.setYRot(yaw);
+        this.setYHeadRot(yaw);
+        this.setYBodyRot(yaw);
+        this.yRotO = yaw;
+        this.yHeadRotO = yaw;
+        this.yBodyRotO = yaw;
+        this.setXRot(0.0F);
+        this.xRotO = 0.0F;
+    }
+
+    private void positionGrabbedPlayer() {
+        Vec3 targetPos = this.getGrabbedPlayerPosition();
+        float yaw = getYawFromDirection(this.grabFacing);
+        float pitch = 0.0F;
+
+        if (this.grabbedPlayer instanceof ServerPlayer serverPlayer) {
+            serverPlayer.connection.teleport(targetPos.x, targetPos.y, targetPos.z, yaw, pitch);
+        } else {
+            this.grabbedPlayer.teleportTo(targetPos.x, targetPos.y, targetPos.z);
+            this.grabbedPlayer.setXRot(pitch);
+        }
+
+        this.grabbedPlayer.setYRot(yaw);
+        this.grabbedPlayer.setYHeadRot(yaw);
+        this.grabbedPlayer.setYBodyRot(yaw);
+        this.grabbedPlayer.yRotO = yaw;
+        this.grabbedPlayer.yHeadRotO = yaw;
+        this.grabbedPlayer.yBodyRotO = yaw;
+        this.grabbedPlayer.setXRot(pitch);
+        this.grabbedPlayer.xRotO = pitch;
     }
 
     @Override
@@ -69,6 +166,9 @@ public class TestMonsterEntity extends PathfinderMob implements GeoEntity {
         if (target instanceof Player player && this.grabbedPlayer == null) {
             this.grabbedPlayer = player;
             this.grabTimer = GRAB_DURATION;
+            this.grabFacing = this.captureGrabFacing(player);
+            this.entityData.set(GRABBED_PLAYER_UUID, Optional.of(player.getUUID()));
+            this.setExecuting(true);
             return true;
         }
         return false;
@@ -88,6 +188,9 @@ public class TestMonsterEntity extends PathfinderMob implements GeoEntity {
 
         if (!this.grabbedPlayer.isAlive() || this.isDeadOrDying()) {
             this.grabbedPlayer = null;
+            this.grabFacing = new Vec3(0.0D, 0.0D, 1.0D);
+            this.entityData.set(GRABBED_PLAYER_UUID, Optional.empty());
+            this.setExecuting(false);
             return;
         }
 
@@ -95,13 +198,17 @@ public class TestMonsterEntity extends PathfinderMob implements GeoEntity {
             this.grabbedPlayer.setDeltaMovement(Vec3.ZERO);
             this.grabbedPlayer.xxa = 0;
             this.grabbedPlayer.zza = 0;
-            this.grabbedPlayer.teleportTo(this.getX(), this.getY(), this.getZ());
+            this.faceGrabbedPlayer();
+            this.positionGrabbedPlayer();
             this.getNavigation().stop();
             this.setDeltaMovement(Vec3.ZERO);
             this.grabTimer--;
         } else {
             this.grabbedPlayer.kill();
             this.grabbedPlayer = null;
+            this.grabFacing = new Vec3(0.0D, 0.0D, 1.0D);
+            this.entityData.set(GRABBED_PLAYER_UUID, Optional.empty());
+            this.setExecuting(false);
         }
     }
 
